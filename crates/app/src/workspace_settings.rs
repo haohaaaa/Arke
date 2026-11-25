@@ -30,8 +30,9 @@ use crate::explorer::ViewMode;
 use crate::keynav::KeyStop;
 use crate::scrollbar::ScrollbarDrag;
 use crate::settings::{
-    Accent, DarkShade, Density, FolderOrder, Language, LastTabAction, Material, NavScope,
-    NewTabAction, Settings, SettingsStore, SortBy, StartLocation, TabLayout, ThemeMode, Tint,
+    Accent, CopyPathSeparator, DarkShade, Density, FolderOrder, Language, LastTabAction, Material,
+    NavScope, NewTabAction, Settings, SettingsStore, SortBy, StartLocation, TabLayout, ThemeMode,
+    Tint,
 };
 use crate::text_input::{InputEvent, TextInput};
 use crate::theme::{self, UiFont as _};
@@ -1529,6 +1530,37 @@ impl Workspace {
                     }),
                 ))
                 .into_any_element(),
+            div()
+                .flex()
+                .flex_col()
+                .child(card(
+                    Icon::CopyPath,
+                    t!("settings.copy_path_separator"),
+                    Some(t!("settings.copy_path_separator_desc")),
+                    choice(
+                        "copy-path-separator",
+                        &[
+                            (
+                                CopyPathSeparator::Backslash,
+                                t!("settings.copy_path_separator_backslash"),
+                            ),
+                            (
+                                CopyPathSeparator::ForwardSlash,
+                                t!("settings.copy_path_separator_forward_slash"),
+                            ),
+                        ],
+                        s.copy_path_separator,
+                        |st, v| st.copy_path_separator = v,
+                        ui,
+                    ),
+                ))
+                .child(sub_row(
+                    t!("settings.quote_copied_paths"),
+                    switch("quote-copied-paths", s.quote_copied_paths, |st| {
+                        st.quote_copied_paths = !st.quote_copied_paths;
+                    }),
+                ))
+                .into_any_element(),
         ];
         let sorting = vec![
             wrapping_card(
@@ -1824,7 +1856,7 @@ impl Workspace {
                 (Some(t!("settings.group_show")), &[0, 2, 1, 5, 6, 7, 8]),
                 (
                     Some(t!("settings.group_behavior")),
-                    &[4, 3, 11, 12, 13, 14, 15],
+                    &[4, 3, 11, 12, 13, 14, 15, 16],
                 ),
                 (Some(t!("settings.group_confirm")), &[9, 10]),
             ],

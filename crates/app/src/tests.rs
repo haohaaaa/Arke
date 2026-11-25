@@ -5526,6 +5526,53 @@ fn context_menu_items_selection_and_keyboard(cx: &mut TestAppContext) {
         shell.clipboard_text.lock().as_deref(),
         Some("\"C:\\c\\a.txt\"\r\n\"C:\\c\\b.txt\"")
     );
+
+    // Forward-slash path separator (#391).
+    *shell.clipboard_text.lock() = None;
+    cx.update(|_, cx| {
+        crate::settings::SettingsStore::global(cx).update(cx, |store, cx| {
+            store.update(
+                |s| s.copy_path_separator = crate::settings::CopyPathSeparator::ForwardSlash,
+                cx,
+            );
+        });
+    });
+    run_command(&view, cx, MenuCommand::CopyPath);
+    wait_shell("copy path forward slash", || {
+        shell.clipboard_text.lock().is_some()
+    });
+    assert_eq!(
+        shell.clipboard_text.lock().as_deref(),
+        Some("\"C:/c/a.txt\"\r\n\"C:/c/b.txt\"")
+    );
+
+    // Unquoted copied paths.
+    *shell.clipboard_text.lock() = None;
+    cx.update(|_, cx| {
+        crate::settings::SettingsStore::global(cx).update(cx, |store, cx| {
+            store.update(|s| s.quote_copied_paths = false, cx);
+        });
+    });
+    run_command(&view, cx, MenuCommand::CopyPath);
+    wait_shell("copy path unquoted", || {
+        shell.clipboard_text.lock().is_some()
+    });
+    assert_eq!(
+        shell.clipboard_text.lock().as_deref(),
+        Some("C:/c/a.txt\r\nC:/c/b.txt")
+    );
+
+    cx.update(|_, cx| {
+        crate::settings::SettingsStore::global(cx).update(cx, |store, cx| {
+            store.update(
+                |s| {
+                    s.copy_path_separator = crate::settings::CopyPathSeparator::Backslash;
+                    s.quote_copied_paths = true;
+                },
+                cx,
+            );
+        });
+    });
     // "Show more options": the Windows menu is read in the background on open and placed in the
     // submenu (earlier menus were each read once too).
     right_click(&view, cx, Some(2));

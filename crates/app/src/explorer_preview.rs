@@ -1455,9 +1455,9 @@ impl Explorer {
                 crate::assets::Icon::CopyPath,
                 true,
                 t!("menu.copy_path"),
-                cx.listener(|this, _: &ClickEvent, _, _| {
+                cx.listener(|this, _: &ClickEvent, _, cx| {
                     if let Some(p) = this.preview.as_ref() {
-                        this.copy_paths(&[(p.path.clone(), p.entry.is_dir_like())]);
+                        this.copy_paths(&[(p.path.clone(), p.entry.is_dir_like())], cx);
                     }
                 }),
             ))

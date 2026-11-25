@@ -3777,9 +3777,13 @@ impl Explorer {
     }
 
     fn start_edit_path(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let sep = SettingsStore::global(cx)
+            .read(cx)
+            .settings
+            .copy_path_separator;
         let text = self
             .display_path()
-            .map_or_default(|p| p.display().to_string());
+            .map_or_default(|p| sep.format_path(p));
         self.editing_path = true;
         self.path_input.update(cx, |input, cx| {
             input.set_text(text, cx);

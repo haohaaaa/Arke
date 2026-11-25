@@ -1991,9 +1991,9 @@ impl Explorer {
             C::ViewColumns => self.view_columns(&crate::explorer::ViewColumns, window, cx),
             C::SortBy(column) => self.pick_sort_column(column, cx),
             C::SortDirection(ascending) => self.pick_sort_direction(ascending, cx),
-            C::CopyPath => self.copy_paths(&targets),
-            C::CopyRelativePath => self.copy_relative_paths(&targets),
-            C::CopyAddress => self.copy_address(&targets),
+            C::CopyPath => self.copy_paths(&targets, cx),
+            C::CopyRelativePath => self.copy_relative_paths(&targets, cx),
+            C::CopyAddress => self.copy_address(&targets, cx),
             C::EditAddress => self.start_edit_path(window, cx),
             C::ClearHistory => {
                 crate::settings::SettingsStore::global(cx)
@@ -2178,15 +2178,22 @@ impl Explorer {
         }
     }
 
-    pub(super) fn copy_paths(&self, targets: &[(PathBuf, bool)]) {
-        // Same as Explorer's "Copy as path": each path quoted, one per line.
+    pub(super) fn copy_paths(&self, targets: &[(PathBuf, bool)], cx: &mut gpui::App) {
+        let (sep, quote) = {
+            let store = crate::settings::SettingsStore::global(cx).read(cx);
+            (
+                store.settings.copy_path_separator,
+                store.settings.quote_copied_paths,
+            )
+        };
+        // Same as Explorer's "Copy as path": each path quoted when enabled, one per line.
         let text = if targets.is_empty() {
             self.current_path()
-                .map_or_default(|p| format!("\"{}\"", p.display()))
+                .map_or_default(|p| sep.format_copied(p, quote))
         } else {
             targets
                 .iter()
-                .map(|(p, _)| format!("\"{}\"", p.display()))
+                .map(|(p, _)| sep.format_copied(p, quote))
                 .collect::<Vec<_>>()
                 .join("\r\n")
         };
@@ -2204,17 +2211,26 @@ impl Explorer {
 
     /// "Copy relative path" in the Details tree: each item's path below the folder shown
     /// (`src\ui\view.rs`), one per line and unquoted, like VS Code. Servers get `/`.
-    fn copy_relative_paths(&self, targets: &[(PathBuf, bool)]) {
+    fn copy_relative_paths(&self, targets: &[(PathBuf, bool)], cx: &mut gpui::App) {
         let Some(here) = self.current_path() else {
             return;
         };
-        let remote = arke_core::remote::is_remote(here);
+        let sep = crate::settings::SettingsStore::global(cx)
+            .read(cx)
+            .settings
+            .copy_path_separator;
+        let forward = arke_core::remote::is_remote(here)
+            || sep == crate::settings::CopyPathSeparator::ForwardSlash;
         let lines: Vec<String> = targets
             .iter()
             .filter_map(|(path, _)| path.strip_prefix(here).ok())
             .map(|rel| {
                 let rel = rel.display().to_string();
-                if remote { rel.replace('\\', "/") } else { rel }
+                if forward {
+                    rel.replace('\\', "/")
+                } else {
+                    rel
+                }
             })
             .collect();
         if lines.is_empty() {
@@ -2234,7 +2250,7 @@ impl Explorer {
     }
 
     /// Path bar "Copy address": plain path without quotes; network locations as `\\server\share\…`.
-    fn copy_address(&self, targets: &[(PathBuf, bool)]) {
+    fn copy_address(&self, targets: &[(PathBuf, bool)], cx: &mut gpui::App) {
         let Some(path) = targets
             .first()
             .map(|(p, _)| p.clone())
@@ -2242,7 +2258,11 @@ impl Explorer {
         else {
             return;
         };
-        let text = path.display().to_string();
+        let sep = crate::settings::SettingsStore::global(cx)
+            .read(cx)
+            .settings
+            .copy_path_separator;
+        let text = sep.format_path(&path);
         let shell = Arc::clone(&self.services.shell);
         let tx = self.events_tx.clone();
         spawn_thread("copy-address", move || {
@@ -2263,7 +2283,7 @@ impl Explorer {
         cx: &mut Context<Self>,
     ) {
         let targets = self.menu_targets();
-        self.copy_paths(&targets);
+        self.copy_paths(&targets, cx);
         cx.notify();
     }
 

@@ -801,12 +801,19 @@ impl Properties {
         }
     }
 
-    /// "Copy path": quoted, one per line, as the menu does.
-    pub(crate) fn copy_path(&self) {
+    /// "Copy path": quoted when enabled, one per line, as the menu does.
+    pub(crate) fn copy_path(&self, cx: &mut App) {
+        let (sep, quote) = {
+            let store = SettingsStore::global(cx).read(cx);
+            (
+                store.settings.copy_path_separator,
+                store.settings.quote_copied_paths,
+            )
+        };
         let text = self
             .targets
             .iter()
-            .map(|(p, _)| format!("\"{}\"", p.display()))
+            .map(|(p, _)| sep.format_copied(p, quote))
             .collect::<Vec<_>>()
             .join("\r\n");
         self.copy_text(text);
@@ -2242,7 +2249,7 @@ impl Properties {
             "props-act-copy",
             Icon::CopyPath,
             t!("menu.copy_path"),
-            cx.listener(|this, _: &ClickEvent, _, _| this.copy_path()),
+            cx.listener(|this, _: &ClickEvent, _, cx| this.copy_path(cx)),
         ));
         if let Some(item) = single {
             if item.entry.is_dir_like() && !self.is_drive() {

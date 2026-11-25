@@ -2900,6 +2900,46 @@ settings.last_tab_close:
   es: Cerrar la ventana
   pt-BR: Fechar a janela
   ja: ウィンドウを閉じる
+settings.copy_path_separator:
+  en: Copy path separator
+  zh-TW: 複製路徑分隔符號
+  zh-CN: 复制路径分隔符
+  de: Pfadtrennzeichen beim Kopieren
+  es: Separador al copiar rutas
+  pt-BR: Separador ao copiar caminhos
+  ja: パスのコピー時の区切り文字
+settings.copy_path_separator_desc:
+  en: Separator used when copying file or folder paths
+  zh-TW: 複製檔案或資料夾路徑時使用的分隔符號
+  zh-CN: 复制文件或文件夹路径时使用的分隔符
+  de: Trennzeichen beim Kopieren von Datei- oder Ordnerpfaden
+  es: Separador usado al copiar rutas de archivos o carpetas
+  pt-BR: Separador usado ao copiar caminhos de arquivos ou pastas
+  ja: ファイルやフォルダーのパスをコピーするときに使用する区切り文字
+settings.copy_path_separator_backslash:
+  en: Backslash (\)
+  zh-TW: 反斜線 (\)
+  zh-CN: 反斜杠 (\)
+  de: Backslash (\)
+  es: Barra invertida (\)
+  pt-BR: Barra invertida (\)
+  ja: バックスラッシュ (\)
+settings.copy_path_separator_forward_slash:
+  en: Forward slash (/)
+  zh-TW: 斜線 (/)
+  zh-CN: 正斜杠 (/)
+  de: Schrägstrich (/)
+  es: Barra (/)
+  pt-BR: Barra (/)
+  ja: スラッシュ (/)
+settings.quote_copied_paths:
+  en: Wrap copied paths in quotes
+  zh-TW: 複製路徑時加上雙引號
+  zh-CN: 复制路径时加上双引号
+  de: Kopierte Pfade in Anführungszeichen setzen
+  es: Poner comillas alrededor de las rutas copiadas
+  pt-BR: Colocar aspas ao redor dos caminhos copiados
+  ja: コピーしたパスを引用符で囲む
 settings.last_tab_home:
   en: Open Home
   zh-TW: 開啟首頁

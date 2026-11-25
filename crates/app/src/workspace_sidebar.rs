@@ -3742,9 +3742,14 @@ impl Workspace {
                 self.run_home_event(&crate::home::HomeEvent::Reveal(path), window, cx);
             }
             SidebarAction::CopyPath(path) => {
+                let text = SettingsStore::global(cx)
+                    .read(cx)
+                    .settings
+                    .copy_path_separator
+                    .format_path(&path);
                 let shell = Arc::clone(&self.services.shell);
                 crate::explorer::spawn_thread("copy-path", move || {
-                    let _ = shell.set_clipboard_text(&path.display().to_string());
+                    let _ = shell.set_clipboard_text(&text);
                 });
             }
             SidebarAction::Properties(path, folder) => {

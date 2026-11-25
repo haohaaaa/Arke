@@ -110,6 +110,38 @@ pub(crate) enum LastTabAction {
     Home,
 }
 
+/// Path separator used when copying paths to the clipboard (#391).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum CopyPathSeparator {
+    /// Windows backslash (`\`), the default.
+    #[default]
+    Backslash,
+    /// Forward slash (`/`).
+    ForwardSlash,
+}
+
+impl CopyPathSeparator {
+    /// Formats `path` with this separator (`\` or `/`).
+    pub(crate) fn format_path(self, path: &std::path::Path) -> String {
+        let text = path.display().to_string();
+        match self {
+            Self::Backslash => text,
+            Self::ForwardSlash => text.replace('\\', "/"),
+        }
+    }
+
+    /// Formats `path` with this separator, optionally wrapped in double quotes.
+    pub(crate) fn format_copied(self, path: &std::path::Path, quote: bool) -> String {
+        let text = self.format_path(path);
+        if quote {
+            format!("\"{text}\"")
+        } else {
+            text
+        }
+    }
+}
+
 /// Dark, light, or follow the system.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -670,6 +702,10 @@ pub(crate) struct Settings {
     pub(crate) use_teracopy: bool,
     /// Double click on empty list space goes up one level.
     pub(crate) double_click_up: bool,
+    /// Path separator used when copying paths (#391).
+    pub(crate) copy_path_separator: CopyPathSeparator,
+    /// Wrap copied paths in double quotes (Explorer's "Copy as path" style).
+    pub(crate) quote_copied_paths: bool,
     /// Compute folder sizes in the background (local disks only).
     pub(crate) folder_sizes: bool,
     /// Treat dot-prefixed items (`.git`, `.vscode`) as hidden.
@@ -856,6 +892,8 @@ impl Default for Settings {
             verify_copies: false,
             use_teracopy: false,
             double_click_up: false,
+            copy_path_separator: CopyPathSeparator::default(),
+            quote_copied_paths: true,
             folder_sizes: true,
             hide_dotfiles: false,
             show_protected: false,
