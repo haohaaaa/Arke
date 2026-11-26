@@ -88,6 +88,12 @@ pub(crate) const VERSION: u64 = 1;
 /// Past that the path is taken as it is, and opening it shows what went wrong.
 const PROBE_TIMEOUT: Duration = Duration::from_millis(500);
 
+/// Default and maximum hit counts for `search` requests.
+pub(crate) const DEFAULT_SEARCH_LIMIT: usize = 100;
+const MAX_SEARCH_LIMIT: usize = 1000;
+/// Maximum time a synchronous `search` request waits for results.
+const SEARCH_TIMEOUT: Duration = Duration::from_secs(5);
+
 /// The class of Arke's normal windows (`third_party/gpui-pre-windows`).
 const WINDOW_CLASS: &str = "ArkeWindow";
 
@@ -110,6 +116,11 @@ pub(crate) enum Request {
     },
     Run {
         id: String,
+    },
+    Search {
+        query: String,
+        limit: usize,
+        similar: bool,
     },
 }
 
@@ -205,6 +216,7 @@ pub(crate) fn parse(bytes: &[u8]) -> Result<Request, ApiError> {
             None => Err(bad("\"id\" is missing")),
             Some(_) => Err(bad("\"id\" is not a string")),
         },
+        "search" => parse_search(object),
         other => Err(ApiError::new(
             ErrorCode::UnknownCommand,
             format!("unknown cmd \"{other}\""),
@@ -248,6 +260,40 @@ fn parse_open(object: &Map<String, Value>) -> Result<Request, ApiError> {
     })
 }
 
+fn parse_search(object: &Map<String, Value>) -> Result<Request, ApiError> {
+    let query = match object.get("query") {
+        Some(Value::String(query)) if !query.trim().is_empty() => query.clone(),
+        Some(Value::String(_)) => return Err(bad("\"query\" is empty")),
+        None => return Err(bad("\"query\" is missing")),
+        Some(_) => return Err(bad("\"query\" is not a string")),
+    };
+    let limit = match object.get("limit") {
+        None | Some(Value::Null) => DEFAULT_SEARCH_LIMIT,
+        Some(Value::Number(n)) => {
+            let Some(limit) = n.as_u64() else {
+                return Err(bad("\"limit\" is not a positive integer"));
+            };
+            if limit == 0 {
+                return Err(bad("\"limit\" must be positive"));
+            }
+            usize::try_from(limit)
+                .unwrap_or(MAX_SEARCH_LIMIT)
+                .min(MAX_SEARCH_LIMIT)
+        }
+        Some(_) => return Err(bad("\"limit\" is not a positive integer")),
+    };
+    let similar = match object.get("similar") {
+        None | Some(Value::Null) => false,
+        Some(Value::Bool(similar)) => *similar,
+        Some(_) => return Err(bad("\"similar\" is not true or false")),
+    };
+    Ok(Request::Search {
+        query,
+        limit,
+        similar,
+    })
+}
+
 /// A request as JSON again, to pass on to the resident Arke.
 pub(crate) fn encode_request(request: &Request) -> String {
     let value = match request {
@@ -268,6 +314,17 @@ pub(crate) fn encode_request(request: &Request) -> String {
             "select": select,
         }),
         Request::Run { id } => json!({ "v": VERSION, "cmd": "run", "id": id }),
+        Request::Search {
+            query,
+            limit,
+            similar,
+        } => json!({
+            "v": VERSION,
+            "cmd": "search",
+            "query": query,
+            "limit": limit,
+            "similar": similar,
+        }),
     };
     value.to_string()
 }
@@ -340,6 +397,33 @@ fn location_json(location: &Location) -> Value {
         Location::RecycleBin => json!({ "kind": "recycle_bin" }),
         Location::Other => json!({ "kind": "other" }),
     }
+}
+
+/// One match returned by a `search` request.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct SearchHit {
+    pub(crate) path: PathBuf,
+    pub(crate) is_dir: bool,
+    pub(crate) size: u64,
+    pub(crate) modified: Option<u64>,
+}
+
+fn search_json(hits: &[SearchHit]) -> Value {
+    let items: Vec<Value> = hits
+        .iter()
+        .map(|hit| {
+            let mut obj = json!({
+                "path": hit.path.to_string_lossy(),
+                "is_dir": hit.is_dir,
+                "size": hit.size,
+            });
+            if let (Some(modified), Some(map)) = (hit.modified, obj.as_object_mut()) {
+                map.insert("modified".into(), Value::from(modified));
+            }
+            obj
+        })
+        .collect();
+    json!({ "v": VERSION, "hits": items })
 }
 
 /// The `state` reply: windows front to back, the first being the one used last. Without
@@ -421,6 +505,7 @@ pub(crate) enum Probe {
 pub(crate) trait Env {
     fn snapshot(&self) -> Snapshot;
     fn probe(&self, path: &Path) -> Probe;
+    fn search(&self, query: &str, limit: usize, similar: bool) -> Result<Vec<SearchHit>, ApiError>;
 }
 
 /// A reply and the work it promised.
@@ -514,6 +599,14 @@ fn respond(
                 }),
             ))
         }
+        Request::Search {
+            query,
+            limit,
+            similar,
+        } => {
+            let hits = env.search(&query, limit, similar)?;
+            Ok((search_json(&hits), None))
+        }
     }
 }
 
@@ -528,6 +621,42 @@ impl Env for Live {
     fn probe(&self, path: &Path) -> Probe {
         probe(path)
     }
+
+    fn search(&self, query: &str, limit: usize, similar: bool) -> Result<Vec<SearchHit>, ApiError> {
+        use crate::global_search::{GlobalSearch, SyncSearchError};
+        let found =
+            GlobalSearch::search_sync(query, limit, similar, SEARCH_TIMEOUT).map_err(|err| {
+                match err {
+                    SyncSearchError::Disabled => ApiError::new(
+                        ErrorCode::Unavailable,
+                        "Search this PC is disabled in Settings",
+                    ),
+                    SyncSearchError::NotReady => {
+                        ApiError::new(ErrorCode::Unavailable, "Search index is not ready yet")
+                    }
+                    SyncSearchError::TimedOut => {
+                        ApiError::new(ErrorCode::Unavailable, "Search timed out")
+                    }
+                }
+            })?;
+        let hits = if found.exact.is_empty() {
+            found.similar.unwrap_or_default()
+        } else {
+            found.exact
+        };
+        Ok(hits
+            .into_iter()
+            .map(|hit| SearchHit {
+                path: hit.path,
+                is_dir: hit.is_dir,
+                size: hit.size,
+                modified: hit
+                    .modified
+                    .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                    .map(|d| d.as_secs()),
+            })
+            .collect())
+    }
 }
 
 /// No Arke is running (`arke.exe --api` answering by itself): no windows.
@@ -540,6 +669,10 @@ impl Env for NotRunning {
 
     fn probe(&self, path: &Path) -> Probe {
         probe(path)
+    }
+
+    fn search(&self, _: &str, _: usize, _: bool) -> Result<Vec<SearchHit>, ApiError> {
+        Err(ApiError::new(ErrorCode::Unavailable, "Arke is not running"))
     }
 }
 
@@ -967,6 +1100,7 @@ mod tests {
     struct Fake {
         snapshot: Snapshot,
         probe: Probe,
+        hits: Vec<SearchHit>,
     }
 
     impl Env for Fake {
@@ -977,12 +1111,17 @@ mod tests {
         fn probe(&self, _: &Path) -> Probe {
             self.probe
         }
+
+        fn search(&self, _: &str, limit: usize, _: bool) -> Result<Vec<SearchHit>, ApiError> {
+            Ok(self.hits.iter().take(limit).cloned().collect())
+        }
     }
 
     fn env(probe: Probe) -> Fake {
         Fake {
             snapshot: Snapshot::default(),
             probe,
+            hits: Vec::new(),
         }
     }
 
@@ -1261,9 +1400,69 @@ mod tests {
             Request::Run {
                 id: "refresh".into(),
             },
+            Request::Search {
+                query: "report ext:pdf".into(),
+                limit: 25,
+                similar: true,
+            },
         ] {
             assert_eq!(parse(encode_request(&request).as_bytes()), Ok(request));
         }
+    }
+
+    #[test]
+    fn search_request_validates_and_formats_hits() {
+        assert_eq!(code(r#"{"v":1,"cmd":"search"}"#), "bad_request");
+        assert_eq!(
+            code(r#"{"v":1,"cmd":"search","query":"   "}"#),
+            "bad_request"
+        );
+        assert_eq!(
+            code(r#"{"v":1,"cmd":"search","query":"a","limit":0}"#),
+            "bad_request"
+        );
+        assert_eq!(
+            code(r#"{"v":1,"cmd":"search","query":"a","similar":"yes"}"#),
+            "bad_request"
+        );
+
+        let fake = Fake {
+            snapshot: Snapshot::default(),
+            probe: Probe::Folder,
+            hits: vec![
+                SearchHit {
+                    path: PathBuf::from(r"D:\Work\report.pdf"),
+                    is_dir: false,
+                    size: 42,
+                    modified: Some(1_700_000_000),
+                },
+                SearchHit {
+                    path: PathBuf::from(r"D:\Work\Reports"),
+                    is_dir: true,
+                    size: 0,
+                    modified: None,
+                },
+            ],
+        };
+        let answer = answer(
+            br#"{"v":1,"cmd":"search","query":"report","limit":1}"#,
+            Target::LastUsed,
+            &fake,
+        );
+        assert!(!is_error(&answer.reply));
+        let value: Value = serde_json::from_slice(&answer.reply).unwrap();
+        assert_eq!(
+            value,
+            json!({
+                "v": 1,
+                "hits": [{
+                    "path": r"D:\Work\report.pdf",
+                    "is_dir": false,
+                    "size": 42,
+                    "modified": 1_700_000_000u64,
+                }],
+            })
+        );
     }
 
     #[test]

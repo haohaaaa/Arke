@@ -84,6 +84,29 @@ const NET_THREADS: usize = 8;
 static NET_SERVICES: parking_lot::RwLock<Vec<Arc<IndexService>>> =
     parking_lot::RwLock::new(Vec::new());
 
+/// Latest global search state published for background callers (such as `api.rs`) that cannot
+/// touch GPUI.
+#[derive(Clone)]
+struct PublishedSearch {
+    enabled: bool,
+    service: Option<Arc<IndexService>>,
+    net: Vec<Arc<IndexService>>,
+}
+
+static PUBLISHED_SEARCH: parking_lot::RwLock<Option<PublishedSearch>> =
+    parking_lot::RwLock::new(None);
+
+/// Why [`GlobalSearch::search_sync`] could not return hits.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum SyncSearchError {
+    /// "Search this PC" is turned off in Settings.
+    Disabled,
+    /// Enabled, but the local index service has not finished starting yet.
+    NotReady,
+    /// Exceeded the caller's timeout.
+    TimedOut,
+}
+
 /// Everything below `dir` from the index of the network location it is in, so a search there
 /// doesn't walk the share; `None` when no network index covers it. Background threads only.
 pub(crate) fn indexed_tree(
@@ -246,6 +269,7 @@ impl GlobalSearch {
         }
         self.sync_net(&want_net, cx);
         if want == self.enabled {
+            self.publish_search();
             return;
         }
         self.enabled = want;
@@ -256,6 +280,7 @@ impl GlobalSearch {
         if want {
             self.start(cx);
         }
+        self.publish_search();
         cx.notify();
     }
 
@@ -353,6 +378,15 @@ impl GlobalSearch {
     /// ([`indexed_tree`]).
     fn publish_net(&self) {
         *NET_SERVICES.write() = self.net.iter().filter_map(|n| n.service.clone()).collect();
+        self.publish_search();
+    }
+
+    fn publish_search(&self) {
+        *PUBLISHED_SEARCH.write() = Some(PublishedSearch {
+            enabled: self.enabled,
+            service: self.service.clone(),
+            net: self.net.iter().filter_map(|n| n.service.clone()).collect(),
+        });
     }
 
     /// Start indexing a network location. If not opened yet this session (NAS may be asleep), read
@@ -530,6 +564,7 @@ impl GlobalSearch {
             self.status = status;
             cx.notify();
         }
+        self.publish_search();
     }
 
     /// The local drives' index service, for folder sizes (it answers only for volumes it follows
@@ -552,7 +587,6 @@ impl GlobalSearch {
         let net: Vec<Arc<IndexService>> =
             self.net.iter().filter_map(|n| n.service.clone()).collect();
         let history = crate::search_history::SearchHistory::snapshot_for_search(cx);
-        let signals = rank_signals(history.clone());
         // Set when the returned task is dropped: the caller replaced it with a newer query, so
         // this one stops scanning instead of finishing for nobody.
         let cancel = Arc::new(AtomicBool::new(false));
@@ -560,50 +594,64 @@ impl GlobalSearch {
         let (tx, rx) = flume::bounded(1);
         let flag = Arc::clone(&cancel);
         crate::explorer::spawn_thread("global-search", move || {
-            let cancel = flag.as_ref();
-            let clock = crate::win::clock();
-            // Top hits from each index, merged and ordered by match quality, then by what the
-            // user opens and where it is (`arke_core::rank`).
-            let pass = |names: NameMatch| -> Option<Vec<IndexHit>> {
-                let mut hits = service.search_until(&query, clock, names, limit, false, cancel)?;
-                for service in &net {
-                    hits.extend(service.search_until(&query, clock, names, limit, false, cancel)?);
-                }
-                if cancel.load(Ordering::Relaxed) {
-                    return None;
-                }
-                // Visited items the local index matched but didn't rank high enough to return.
-                // Not for network locations: reading an item there can hang on a sleeping NAS.
-                let extra = history.as_ref().map_or_else(Vec::new, |history| {
-                    service.frecent_hits(&query, clock, names, false, history, FRECENT_MAX)
-                });
-                let parsed = iq::Query {
-                    names,
-                    ..iq::Query::parse(&query, clock)
-                };
-                Some(arke_core::rank::merge(
-                    hits, extra, &parsed, &signals, limit,
-                ))
-            };
-            let Some(exact) = pass(NameMatch::Exact) else {
-                return;
-            };
-            let wanted = (similar || exact.is_empty())
-                && iq::has_similar(&iq::Query::parse(&query, clock).text);
-            let similar = if wanted {
-                let Some(similar) = pass(NameMatch::Similar) else {
-                    return;
-                };
-                Some(similar)
-            } else {
-                None
-            };
-            let _ = tx.send(Found { exact, similar });
+            if let Some(found) = run_search_sync(
+                &service,
+                &net,
+                history.as_ref(),
+                &query,
+                limit,
+                similar,
+                &flag,
+            ) {
+                let _ = tx.send(found);
+            }
         });
         Some(cx.background_executor().spawn(async move {
             let _cancel_on_drop = CancelOnDrop(cancel);
             rx.recv_async().await.unwrap_or_default()
         }))
+    }
+
+    /// Synchronous query for non-UI callers (such as `api.rs` on the pipe thread).
+    pub(crate) fn search_sync(
+        query: &str,
+        limit: usize,
+        similar: bool,
+        timeout: std::time::Duration,
+    ) -> Result<Found, SyncSearchError> {
+        let published = PUBLISHED_SEARCH.read().clone();
+        let Some(published) = published else {
+            return Err(SyncSearchError::NotReady);
+        };
+        if !published.enabled {
+            return Err(SyncSearchError::Disabled);
+        }
+        let Some(service) = published.service else {
+            return Err(SyncSearchError::NotReady);
+        };
+        let net = published.net;
+        let query = query.to_owned();
+        let cancel = Arc::new(AtomicBool::new(false));
+        let flag = Arc::clone(&cancel);
+        let (tx, rx) = flume::bounded(1);
+        let spawned = std::thread::Builder::new()
+            .name("api-search".into())
+            .spawn(move || {
+                if let Some(found) =
+                    run_search_sync(&service, &net, None, &query, limit, similar, &flag)
+                {
+                    let _ = tx.send(found);
+                }
+            });
+        if spawned.is_err() {
+            return Err(SyncSearchError::TimedOut);
+        }
+        if let Ok(found) = rx.recv_timeout(timeout) {
+            Ok(found)
+        } else {
+            cancel.store(true, Ordering::Relaxed);
+            Err(SyncSearchError::TimedOut)
+        }
     }
 
     /// Install or remove the background service (UAC prompt). Restarts indexing afterwards to use
@@ -702,6 +750,51 @@ pub(crate) struct Found {
     pub(crate) exact: Vec<IndexHit>,
     /// `None` when similar names weren't looked for.
     pub(crate) similar: Option<Vec<IndexHit>>,
+}
+
+fn run_search_sync(
+    service: &IndexService,
+    net: &[Arc<IndexService>],
+    history: Option<&Arc<arke_core::frecency::FrecencySnapshot>>,
+    query: &str,
+    limit: usize,
+    similar: bool,
+    cancel: &AtomicBool,
+) -> Option<Found> {
+    let clock = crate::win::clock();
+    let signals = rank_signals(history.cloned());
+    // Top hits from each index, merged and ordered by match quality, then by what the
+    // user opens and where it is (`arke_core::rank`).
+    let pass = |names: NameMatch| -> Option<Vec<IndexHit>> {
+        let mut hits = service.search_until(query, clock, names, limit, false, cancel)?;
+        for service in net {
+            hits.extend(service.search_until(query, clock, names, limit, false, cancel)?);
+        }
+        if cancel.load(Ordering::Relaxed) {
+            return None;
+        }
+        // Visited items the local index matched but didn't rank high enough to return.
+        // Not for network locations: reading an item there can hang on a sleeping NAS.
+        let extra = history.map_or_else(Vec::new, |history| {
+            service.frecent_hits(query, clock, names, false, history, FRECENT_MAX)
+        });
+        let parsed = iq::Query {
+            names,
+            ..iq::Query::parse(query, clock)
+        };
+        Some(arke_core::rank::merge(
+            hits, extra, &parsed, &signals, limit,
+        ))
+    };
+    let exact = pass(NameMatch::Exact)?;
+    let wanted =
+        (similar || exact.is_empty()) && iq::has_similar(&iq::Query::parse(query, clock).text);
+    let similar = if wanted {
+        Some(pass(NameMatch::Similar)?)
+    } else {
+        None
+    };
+    Some(Found { exact, similar })
 }
 
 /// Sets the flag when dropped (a search task dropped before its result arrived).
