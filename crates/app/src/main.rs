@@ -10,6 +10,7 @@
 //!   arke --quit                 quit the resident process
 //!   arke --api <json>           an integration API request; prints the JSON reply (see `api.rs`
 //!                               and `docs/integration.md`)
+//!   arke --query <text>         query "Search this PC" headless and print matching paths
 //!   arke --home                 what Win+E runs while "Open folders in Arke" is on: opens a window
 //!                               like starting Arke (Settings › "New windows open to")
 //!   arke --search <text>        a new window searching the whole computer for <text>
@@ -349,6 +350,10 @@ fn main() -> std::process::ExitCode {
             }
         };
         return run_api_cli(json.trim());
+    }
+    // `arke.exe --query <text> [--limit <n>] [--json] [--similar]`: headless "Search this PC".
+    if args.get(1).map(String::as_str) == Some("--query") {
+        return run_query_cli(&args[2..]);
     }
     // A Browse button's file dialog, shown in its own process (see `win_picker.rs`).
     if args.get(1).map(String::as_str) == Some(win_picker::PICK_ARG) {
@@ -1800,8 +1805,84 @@ fn apply_api(cx: &mut App, services: &Services, action: api::Action) {
     }
 }
 
+/// `arke.exe --query <text> [--limit <n>] [--json] [--similar]`: queries "Search this PC"
+/// without opening a window and prints matching paths (or JSON with `--json`).
+fn run_query_cli(args: &[String]) -> std::process::ExitCode {
+    use std::io::Write as _;
+    bench_index::console::attach();
+    rust_i18n::set_locale(&win::ui_locale());
+
+    let mut limit = api::DEFAULT_SEARCH_LIMIT;
+    let mut json_out = false;
+    let mut similar = false;
+    let mut terms: Vec<&str> = Vec::new();
+    let mut it = args.iter();
+    while let Some(arg) = it.next() {
+        match arg.as_str() {
+            "--json" => json_out = true,
+            "--similar" => similar = true,
+            "--limit" => {
+                let Some(val) = it.next() else {
+                    let _ = writeln!(std::io::stderr(), "arke: --limit requires a number");
+                    return std::process::ExitCode::FAILURE;
+                };
+                let Ok(n) = val.parse::<usize>() else {
+                    let _ = writeln!(std::io::stderr(), "arke: invalid --limit \"{val}\"");
+                    return std::process::ExitCode::FAILURE;
+                };
+                if n == 0 {
+                    let _ = writeln!(std::io::stderr(), "arke: --limit must be positive");
+                    return std::process::ExitCode::FAILURE;
+                }
+                limit = n;
+            }
+            _ => terms.push(arg.as_str()),
+        }
+    }
+    let query = terms.join(" ");
+    if query.trim().is_empty() {
+        let _ = writeln!(
+            std::io::stderr(),
+            "usage: arke.exe --query <text> [--limit <n>] [--json] [--similar]"
+        );
+        return std::process::ExitCode::FAILURE;
+    }
+
+    let request = api::encode_request(&api::Request::Search {
+        query,
+        limit,
+        similar,
+    });
+    let reply = api_cli_reply(&request);
+    if json_out {
+        return api::print_reply(&reply);
+    }
+    let Ok(value) = serde_json::from_slice::<serde_json::Value>(&reply) else {
+        let _ = writeln!(std::io::stderr(), "arke: invalid reply from resident Arke");
+        return std::process::ExitCode::FAILURE;
+    };
+    if let Some(err) = value.get("error") {
+        let msg = err
+            .get("message")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("search failed");
+        let _ = writeln!(std::io::stderr(), "arke: {msg}");
+        return std::process::ExitCode::FAILURE;
+    }
+    let mut stdout = std::io::stdout().lock();
+    if let Some(hits) = value.get("hits").and_then(serde_json::Value::as_array) {
+        for hit in hits {
+            if let Some(path) = hit.get("path").and_then(serde_json::Value::as_str) {
+                let _ = writeln!(stdout, "{path}");
+            }
+        }
+    }
+    std::process::ExitCode::SUCCESS
+}
+
 /// `arke.exe --api <json>`: asks the resident Arke and prints its reply. With no Arke running,
-/// `state` and `commands` are answered here; `open` and `run` start one in the background first.
+/// `state` and `commands` are answered here; `open`, `run`, and `search` start one in the
+/// background first.
 fn run_api_cli(json: &str) -> std::process::ExitCode {
     // A GUI program has no console of its own: write to the one it was started from.
     bench_index::console::attach();
@@ -1817,6 +1898,7 @@ fn api_cli_reply(json: &str) -> Vec<u8> {
         Ok(request) => request,
         Err(error) => return api::error_reply(&error),
     };
+    let is_search = matches!(request, api::Request::Search { .. });
     let message = api::encode_request(&api::absolute(request));
     match instance::ask(&message, instance::CLIENT_TIMEOUT) {
         instance::Asked::Replied(reply) => return reply,
@@ -1824,9 +1906,11 @@ fn api_cli_reply(json: &str) -> Vec<u8> {
         instance::Asked::NoServer => {}
     }
     // Nothing is running: what needs no window is answered here, as are requests that fail.
-    let local = api::answer(message.as_bytes(), api::Target::LastUsed, &api::NotRunning);
-    if local.action.is_none() {
-        return local.reply;
+    if !is_search {
+        let local = api::answer(message.as_bytes(), api::Target::LastUsed, &api::NotRunning);
+        if local.action.is_none() {
+            return local.reply;
+        }
     }
     if !start_background_arke() {
         return api_unavailable();
@@ -1834,12 +1918,30 @@ fn api_cli_reply(json: &str) -> Vec<u8> {
     let deadline = Instant::now() + API_START_TIMEOUT;
     while Instant::now() < deadline {
         match instance::ask(&message, Duration::from_secs(10)) {
-            instance::Asked::Replied(reply) => return reply,
+            instance::Asked::Replied(reply) => {
+                if is_search && api_search_not_ready(&reply) {
+                    std::thread::sleep(Duration::from_millis(100));
+                    continue;
+                }
+                return reply;
+            }
             instance::Asked::Failed => return api_unavailable(),
             instance::Asked::NoServer => std::thread::sleep(Duration::from_millis(100)),
         }
     }
     api_unavailable()
+}
+
+fn api_search_not_ready(reply: &[u8]) -> bool {
+    serde_json::from_slice::<serde_json::Value>(reply)
+        .ok()
+        .and_then(|v| {
+            v.get("error")?
+                .get("message")?
+                .as_str()
+                .map(|m| m == "Search index is not ready yet")
+        })
+        .unwrap_or(false)
 }
 
 fn api_unavailable() -> Vec<u8> {

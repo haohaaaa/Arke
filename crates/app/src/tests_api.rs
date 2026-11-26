@@ -72,6 +72,10 @@ impl api::Env for TestEnv {
             _ => Probe::Missing,
         }
     }
+
+    fn search(&self, _: &str, _: usize, _: bool) -> Result<Vec<api::SearchHit>, api::ApiError> {
+        Ok(Vec::new())
+    }
 }
 
 fn answer(request: &str) -> (Value, Option<Action>) {

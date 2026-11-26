@@ -61,6 +61,9 @@ echo {"v":1,"cmd":"state"} | arke.exe --api -
   window used last).
 - `arke.exe --search "text"` opens a new window that searches the whole computer for `text`
   (the same as Ctrl+K and typing it). It starts Arke when none is running.
+- `arke.exe --query "text" [--limit 100] [--json] [--similar]` queries the "Search this PC" index
+  headless and prints matching paths (or JSON with `--json`) to standard output without opening a
+  window. It starts Arke in the background when none is running.
 
 ## Requests
 
@@ -73,6 +76,7 @@ ignored.
 | `open` | `path` (required), `new_tab` (default `false`), `select` (array of names, optional) | Shows `path` in the active pane of the window (or in a new tab with `new_tab`) and brings the window to the front; `select` selects those items once the folder is listed |
 | `run` | `id` (a command id) | Runs a command palette command in the window's active pane |
 | `commands` | none | Lists the ids and names `run` takes, so tools don't have to hard-code them |
+| `search` | `query` (required), `limit` (default `100`, max `1000`), `similar` (default `false`) | Searches the "Search this PC" index without opening a window and returns matching items (`hits`) |
 
 `open` details:
 
