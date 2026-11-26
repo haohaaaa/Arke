@@ -14,6 +14,7 @@ use crate::settings::Settings;
 use crate::theme;
 
 static FULL_DATES: AtomicBool = AtomicBool::new(false);
+static DATE_COLORS: AtomicBool = AtomicBool::new(true);
 static SHOW_MODIFIED: AtomicBool = AtomicBool::new(true);
 static SHOW_CREATED: AtomicBool = AtomicBool::new(false);
 static SHOW_TYPE: AtomicBool = AtomicBool::new(true);
@@ -383,6 +384,7 @@ pub(crate) fn apply(settings: &Settings) {
     let mut changed = false;
     for (slot, value) in [
         (&FULL_DATES, settings.full_dates),
+        (&DATE_COLORS, settings.date_colors),
         (&SHOW_MODIFIED, settings.show_modified),
         (&SHOW_CREATED, settings.show_created),
         (&SHOW_TYPE, settings.show_type),
@@ -431,6 +433,11 @@ pub(crate) fn apply(settings: &Settings) {
 /// Show full date-times for Modified (instead of short forms like "Today 07:49").
 pub(crate) fn full_dates() -> bool {
     FULL_DATES.load(Ordering::Relaxed)
+}
+
+/// Color-code dates in details view by recency (OneCommander style).
+pub(crate) fn date_colors() -> bool {
+    DATE_COLORS.load(Ordering::Relaxed)
 }
 
 pub(crate) fn show_modified() -> bool {

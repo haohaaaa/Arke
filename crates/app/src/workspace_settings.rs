@@ -1586,6 +1586,14 @@ impl Workspace {
                 ),
             ),
             card(
+                Icon::Info,
+                t!("settings.date_colors"),
+                Some(t!("settings.date_colors_desc")),
+                switch("date-colors", s.date_colors, |st| {
+                    st.date_colors = !st.date_colors;
+                }),
+            ),
+            card(
                 Icon::Drive,
                 t!("settings.size_units"),
                 None,

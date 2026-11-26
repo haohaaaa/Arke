@@ -1175,6 +1175,38 @@ pub(crate) fn syncing() -> Rgba {
     text_muted()
 }
 
+/// Date text color by recency (OneCommander style): today, this week, this month, this year, older.
+pub(crate) fn date_age_color(
+    time: Option<std::time::SystemTime>,
+    now: std::time::SystemTime,
+) -> Rgba {
+    date_age_color_for(time, now, p(), is_dark())
+}
+
+fn date_age_color_for(
+    time: Option<std::time::SystemTime>,
+    now: std::time::SystemTime,
+    palette: &Palette,
+    dark: bool,
+) -> Rgba {
+    const DAY: u64 = 86_400;
+    let Some(time) = time else {
+        return alpha(palette.ink, palette.a_subtle);
+    };
+    let age = now.duration_since(time).map_or(0, |d| d.as_secs());
+    if age <= DAY {
+        hex(if dark { 0x4ade80 } else { 0x15803d })
+    } else if age <= 7 * DAY {
+        hex(if dark { 0x38bdf8 } else { 0x0369a1 })
+    } else if age <= 30 * DAY {
+        hex(if dark { 0x818cf8 } else { 0x4f46e5 })
+    } else if age <= 365 * DAY {
+        alpha(palette.ink, palette.a_muted)
+    } else {
+        alpha(palette.ink, palette.a_subtle)
+    }
+}
+
 // --- Shadows ---
 
 fn hairline(color: Rgba) -> BoxShadow {
@@ -1831,5 +1863,45 @@ mod tests {
         // oklch(0.628 0.2577 29.23) is pure sRGB red.
         let red = oklch(0.627_955, 0.257_683, 29.233_885);
         assert!((red.r - 1.).abs() < 0.01 && red.g < 0.01 && red.b < 0.01);
+    }
+
+    #[test]
+    fn date_age_colors_follow_recency_buckets() {
+        use std::time::{Duration, SystemTime};
+        let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
+        let ago = |secs: u64| Some(now - Duration::from_secs(secs));
+        assert_eq!(
+            pack(date_age_color_for(ago(3_600), now, &LIGHT, false)),
+            0x15803d
+        );
+        assert_eq!(
+            pack(date_age_color_for(ago(3 * 86_400), now, &LIGHT, false)),
+            0x0369a1
+        );
+        assert_eq!(
+            pack(date_age_color_for(ago(15 * 86_400), now, &LIGHT, false)),
+            0x4f46e5
+        );
+        assert_eq!(
+            date_age_color_for(ago(120 * 86_400), now, &LIGHT, false),
+            alpha(LIGHT.ink, LIGHT.a_muted)
+        );
+        assert_eq!(
+            date_age_color_for(ago(400 * 86_400), now, &LIGHT, false),
+            alpha(LIGHT.ink, LIGHT.a_subtle)
+        );
+        assert_eq!(
+            date_age_color_for(None, now, &DARK, true),
+            alpha(DARK.ink, DARK.a_subtle)
+        );
+        assert_eq!(
+            pack(date_age_color_for(
+                Some(now + Duration::from_secs(60)),
+                now,
+                &DARK,
+                true
+            )),
+            0x4ade80
+        );
     }
 }

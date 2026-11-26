@@ -3602,11 +3602,16 @@ pub(super) fn date_cell(
     width: Pixels,
     shell: &dyn crate::shell::Shell,
 ) -> impl IntoElement {
+    let color = if crate::prefs::date_colors() {
+        theme::date_age_color(time, std::time::SystemTime::now())
+    } else {
+        theme::text_muted()
+    };
     div()
         .w(width)
         .flex_none()
         .text_size(theme::fs_12())
-        .text_color(theme::text_muted())
+        .text_color(color)
         .child(time.map_or_default(|t| {
             if crate::prefs::full_dates() {
                 shell.format_time(t)

@@ -134,11 +134,7 @@ impl CopyPathSeparator {
     /// Formats `path` with this separator, optionally wrapped in double quotes.
     pub(crate) fn format_copied(self, path: &std::path::Path, quote: bool) -> String {
         let text = self.format_path(path);
-        if quote {
-            format!("\"{text}\"")
-        } else {
-            text
-        }
+        if quote { format!("\"{text}\"") } else { text }
     }
 }
 
@@ -726,6 +722,8 @@ pub(crate) struct Settings {
     pub(crate) details_tree: bool,
     /// Full date and time for modified dates instead of the short form ("Today 07:49").
     pub(crate) full_dates: bool,
+    /// Color-code dates in details view by how recent they are (today, this week, this month).
+    pub(crate) date_colors: bool,
     /// Visible columns in details view.
     pub(crate) show_modified: bool,
     /// Created column in details view, hidden by default.
@@ -904,6 +902,7 @@ impl Default for Settings {
             single_click: false,
             point_to_select: true,
             full_dates: false,
+            date_colors: true,
             show_modified: true,
             show_created: false,
             column_widths: ColumnWidths::default(),

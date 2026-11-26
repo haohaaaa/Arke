@@ -3444,6 +3444,22 @@ settings.dates_full:
   es: Completo (11/11/2026 07:49)
   pt-BR: Completo (11/11/2026 07:49)
   ja: 完全 (2026/11/11 07:49)
+settings.date_colors:
+  en: "Color-code dates by age"
+  zh-TW: "依時間新舊標示日期顏色"
+  zh-CN: "按时间新旧标示日期颜色"
+  de: Datum nach Alter einfärben
+  es: Colorear fechas según antigüedad
+  pt-BR: Colorir datas por idade
+  ja: 日付を新しさで色分け
+settings.date_colors_desc:
+  en: "Highlight today, this week, and this month in distinct colors"
+  zh-TW: "以不同顏色區分今天、本週與本月修改的項目"
+  zh-CN: "用不同颜色区分今天、本周和本月修改的项目"
+  de: Hebt heute, diese Woche und diesen Monat farblich hervor
+  es: Resalta hoy, esta semana y este mes con distintos colores
+  pt-BR: Destaca hoje, esta semana e este mês em cores diferentes
+  ja: 今日・今週・今月の項目を異なる色で強調します
 settings.size_units:
   en: "File size units"
   zh-TW: "檔案大小單位"
