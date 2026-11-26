@@ -3597,28 +3597,78 @@ fn backdrop_layer() -> Option<impl IntoElement> {
 }
 
 /// Date column (modified, created); short or full format per settings.
+fn format_age_badge(time: std::time::SystemTime, now: std::time::SystemTime) -> String {
+    let secs = now.duration_since(time).map_or(0, |d| d.as_secs());
+    let mins = secs / 60;
+    if mins < 60 {
+        let m = mins.max(1);
+        return t!("date_age.min", n = m).into_owned();
+    }
+    let hours = secs / 3_600;
+    if hours < 6 {
+        let rem_mins = (secs % 3_600) / 60;
+        return t!("date_age.hour_min", h = hours, m = rem_mins).into_owned();
+    }
+    if hours < 24 {
+        return t!("date_age.hour", n = hours).into_owned();
+    }
+    let days = secs / 86_400;
+    if days < 90 {
+        return t!("date_age.day", n = days).into_owned();
+    }
+    if days < 365 {
+        let months = (days / 30).max(1);
+        return t!("date_age.month", n = months).into_owned();
+    }
+    let years = (days / 365).max(1);
+    t!("date_age.year", n = years).into_owned()
+}
+
 pub(super) fn date_cell(
     time: Option<std::time::SystemTime>,
     width: Pixels,
     shell: &dyn crate::shell::Shell,
 ) -> impl IntoElement {
-    let color = if crate::prefs::date_colors() {
-        theme::date_age_color(time, std::time::SystemTime::now())
-    } else {
-        theme::text_muted()
-    };
+    let now = std::time::SystemTime::now();
+    let badge = crate::prefs::date_colors()
+        .then(|| time.zip(theme::date_age_badge(time, now)))
+        .flatten();
+    let text = time.map_or_default(|t| {
+        if crate::prefs::full_dates() {
+            shell.format_time(t)
+        } else {
+            shell.format_time_short(t)
+        }
+    });
     div()
         .w(width)
         .flex_none()
-        .text_size(theme::fs_12())
-        .text_color(color)
-        .child(time.map_or_default(|t| {
-            if crate::prefs::full_dates() {
-                shell.format_time(t)
-            } else {
-                shell.format_time_short(t)
-            }
-        }))
+        .flex()
+        .items_center()
+        .gap(theme::s_8())
+        .when_some(badge, |el, (t, (bg, fg))| {
+            el.child(
+                div()
+                    .w(theme::scaled_px(48.))
+                    .h(theme::scaled_px(18.))
+                    .px(theme::s_4())
+                    .flex_none()
+                    .flex()
+                    .items_center()
+                    .justify_end()
+                    .rounded(px(2.))
+                    .bg(bg)
+                    .text_size(theme::fs_11())
+                    .text_color(fg)
+                    .child(format_age_badge(t, now)),
+            )
+        })
+        .child(
+            div()
+                .text_size(theme::fs_12())
+                .text_color(theme::text_muted())
+                .child(text),
+        )
 }
 
 /// Cloud file state after the name, like Explorer: a cloud for online-only; inside sync roots a

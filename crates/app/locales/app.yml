@@ -3460,6 +3460,54 @@ settings.date_colors_desc:
   es: Resalta hoy, esta semana y este mes con distintos colores
   pt-BR: Destaca hoje, esta semana e este mês em cores diferentes
   ja: 今日・今週・今月の項目を異なる色で強調します
+date_age.min:
+  en: "%{n}m"
+  zh-TW: "%{n}'"
+  zh-CN: "%{n}'"
+  de: "%{n} Min."
+  es: "%{n} min"
+  pt-BR: "%{n} min"
+  ja: "%{n}分"
+date_age.hour_min:
+  en: "%{h}h %{m}m"
+  zh-TW: "%{h} 時 %{m}'"
+  zh-CN: "%{h} 时 %{m}'"
+  de: "%{h} Std. %{m}'"
+  es: "%{h} h %{m}'"
+  pt-BR: "%{h} h %{m}'"
+  ja: "%{h}時間%{m}分"
+date_age.hour:
+  en: "%{n}h"
+  zh-TW: "%{n} 時"
+  zh-CN: "%{n} 时"
+  de: "%{n} Std."
+  es: "%{n} h"
+  pt-BR: "%{n} h"
+  ja: "%{n}時間"
+date_age.day:
+  en: "%{n}d"
+  zh-TW: "%{n} 天"
+  zh-CN: "%{n} 天"
+  de: "%{n} T."
+  es: "%{n} d"
+  pt-BR: "%{n} d"
+  ja: "%{n}日"
+date_age.month:
+  en: "%{n}mo"
+  zh-TW: "%{n} 月"
+  zh-CN: "%{n} 月"
+  de: "%{n} Mon."
+  es: "%{n} mes"
+  pt-BR: "%{n} mês"
+  ja: "%{n}か月"
+date_age.year:
+  en: "%{n}y"
+  zh-TW: "%{n} 年"
+  zh-CN: "%{n} 年"
+  de: "%{n} J."
+  es: "%{n} a"
+  pt-BR: "%{n} a"
+  ja: "%{n}年"
 settings.size_units:
   en: "File size units"
   zh-TW: "檔案大小單位"

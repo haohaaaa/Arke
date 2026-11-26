@@ -535,10 +535,16 @@ impl Explorer {
                     } else {
                         entry.created
                     };
-                    text_w(
-                        &self.date_text(time, crate::prefs::full_dates()),
-                        theme::fs_12(),
-                    )
+                    let badge_w = if crate::prefs::date_colors() && time.is_some() {
+                        theme::scaled_px(56.)
+                    } else {
+                        px(0.)
+                    };
+                    badge_w
+                        + text_w(
+                            &self.date_text(time, crate::prefs::full_dates()),
+                            theme::fs_12(),
+                        )
                 }
                 Col::Size => {
                     let text = super::view::size_text(entry, self.folder_size(&entry.name)).0;

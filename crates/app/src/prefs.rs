@@ -175,9 +175,18 @@ impl Col {
     fn default_width(self) -> Pixels {
         match self {
             Self::Name => theme::col_name_max(),
-            // Full date-times are longer.
-            Self::Modified | Self::Created if full_dates() => px(180.),
-            Self::Modified | Self::Created => theme::col_modified(),
+            Self::Modified | Self::Created => {
+                let base = if full_dates() {
+                    px(180.)
+                } else {
+                    theme::col_modified()
+                };
+                if date_colors() {
+                    base + theme::scaled_px(56.)
+                } else {
+                    base
+                }
+            }
             Self::Type => theme::col_type(),
             Self::Size => theme::col_size(),
             Self::Extension => theme::col_extension(),
